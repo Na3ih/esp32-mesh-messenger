@@ -1,67 +1,216 @@
+/**
+  @brief TODO:  
+  
+  @note Based on example made by Rui Santos (Random Nerd Tutorial): https://github.com/gmag11/painlessMesh/blob/master/examples/basic/basic.ino
+
+  @todo:
+  - debug macro, defines to external file
+  - wifi AP,
+  - webserver (chat in js, dns)   
+  - doxygen
+  - unit tests 
+  */
+
 #include <Arduino.h>
 
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp-mesh-esp32-esp8266-painlessmesh/
-  
-  This is a simple example that uses the painlessMesh library: https://github.com/gmag11/painlessMesh/blob/master/examples/basic/basic.ino
-*/
-
 #include "painlessMesh.h"
+#include "mesh_config.h"
+#include "pinout.h"
 
-#define   MESH_PREFIX     "whateverYouLike"
-#define   MESH_PASSWORD   "somethingSneaky"
-#define   MESH_PORT       5555
+/*************************************************************************** Defines and Enums ****************************************************************************/
+/**
+ * @defgroup defines_and_enums Defines and Enums
+ * @{
+ */
 
-Scheduler userScheduler; // to control your personal task
+/**
+ * @brief Macro to enable additional debug logs and functions
+ * XXX: comment if not needed (release mode)
+ */
+#define DEBUG_INFO
+
+/// XXX: Define the DEBUG macro above to enable conditional printf
+#ifdef DEBUG_INFO
+    #define LOG_DEBUG(...) Serial.printf("DEBUG: " __VA_ARGS__); Serial.println()
+#else
+    #define LOG_DEBUG(...) // No operation
+#endif
+
+#define LOG_ERROR(...) Serial.printf("ERROR: " __VA_ARGS__); Serial.println()
+#define LOG_INFO(...) Serial.printf("INFO: " __VA_ARGS__); Serial.println()
+
+/** @} defines_and_enums */ 
+
+/************************************************************************** Static API declaration ****************************************************************************/
+/**
+ * @defgroup static_api Static api declaration
+ * @{
+ */
+static void checkSerial(void);
+static void sendMessage(void);
+static void blinkNodes(void);
+
+static void receivedCallback(uint32_t from, String &msg);
+static void newConnectionCallback(uint32_t nodeId);
+static void changedConnectionCallback(void);
+/** @} static_api */
+
+/*************************************************************************** Global variables ****************************************************************************/
+/**
+ * @defgroup global_variables Global variables
+ * @{
+ */
+Scheduler userScheduler;
 painlessMesh  mesh;
 
-// User stub
-void sendMessage() ; // Prototype so PlatformIO doesn't complain
+/**
+ * @brief Task using internal LED to indicate the number of nodes in the network every 3 seconds
+ */
+Task taskBlinkNodes(TASK_SECOND * 3, 1, &blinkNodes);
 
-Task taskSendMessage( TASK_SECOND * 1 , TASK_FOREVER, &sendMessage );
+/**
+ * @brief Task using to check if there is a data to send available on Serial port
+ */
+Task taskCheckSerial(TASK_MILLISECOND * 250, 1, &checkSerial);
 
-void sendMessage() {
-  String msg = "Hi from node1";
-  msg += mesh.getNodeId();
-  mesh.sendBroadcast( msg );
-  taskSendMessage.setInterval( random( TASK_SECOND * 1, TASK_SECOND * 5 ));
-}
+/**
+ * @brief Variable to control built-in LED to indicate the number of nodes in the network 
+ */
+static volatile bool onFlag = true;
+/** @} global_variables */
 
-// Needed for painless library
-void receivedCallback( uint32_t from, String &msg ) {
-  Serial.printf("startHere: Received from %u msg=%s\n", from, msg.c_str());
-}
-
-void newConnectionCallback(uint32_t nodeId) {
-    Serial.printf("--> startHere: New Connection, nodeId = %u\n", nodeId);
-}
-
-void changedConnectionCallback() {
-  Serial.printf("Changed connections\n");
-}
-
-void nodeTimeAdjustedCallback(int32_t offset) {
-    Serial.printf("Adjusted time %u. Offset = %d\n", mesh.getNodeTime(),offset);
-}
-
+/*************************************************************************** Main function ****************************************************************************/
+/**
+ * @defgroup main_function Main function
+ * @{
+ */
 void setup() {
   Serial.begin(115200);
-
-//mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | GENERAL | MSG_TYPES | REMOTE ); // all types on
-  mesh.setDebugMsgTypes( ERROR | STARTUP );  // set before init() so that you can see startup messages
-
+  
+  mesh.setDebugMsgTypes( ERROR | STARTUP );
   mesh.init( MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT );
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
   mesh.onChangedConnections(&changedConnectionCallback);
-  mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
 
-  userScheduler.addTask( taskSendMessage );
-  taskSendMessage.enable();
+  userScheduler.addTask(taskBlinkNodes);
+  taskBlinkNodes.enable();
+
+  userScheduler.addTask(taskCheckSerial);
+  taskCheckSerial.enable();
+
+  pinMode(LED, OUTPUT);
+  LOG_DEBUG("Setup completed");
 }
 
 void loop() {
   // it will run the user scheduler as well
   mesh.update();
+  digitalWrite(LED, onFlag);
 }
+/** @} main_function */
+
+/*************************************************************************** Static API definitions ****************************************************************************/
+/**
+ * @defgroup static_api_defs Static APIs
+ * @{
+ */
+
+ /**
+ * @brief Read string from Serial (if available) and send as broadcast message
+ * @note  Trigered 4/s
+ */
+static void checkSerial(void) {
+      if (Serial.available() != 0) {
+        sendMessage();
+      }
+      taskCheckSerial.setIterations(1);
+      taskCheckSerial.setInterval(TASK_MILLISECOND * 250); 
+};
+
+/**
+ * @brief Indicates the number of nodes by blinking the built-in LED. (Called every 3 seconds by taskBlinkNodes)
+ * 
+ */
+static void blinkNodes(void) {
+      onFlag = !onFlag; 
+      taskBlinkNodes.delay(BLINK_DURATION_MS);
+
+      if (taskBlinkNodes.isLastIteration()) {
+        taskBlinkNodes.setIterations(((mesh.getNodeList().size() + 1) * 2));
+        taskBlinkNodes.setInterval(BLINK_PERIOD_MS); 
+      }
+};
+
+/**
+ * @brief Read string from Serial and send in broadcast message
+ * @note  Max text length is set to 260 Bytes
+ */
+static void sendMessage(void)
+{
+    char text[260];
+    Serial.readBytesUntil('\n', text, 260);
+    StaticJsonDocument<300> jsonDoc; // add dynamic size of msg
+    jsonDoc["sender"] = NODE_ID;
+    jsonDoc["text"] = text;
+
+    String jsonString;
+    serializeJson(jsonDoc, jsonString);
+
+    int ret = mesh.sendBroadcast(jsonString);
+    if (ret != 1) {
+      LOG_ERROR("sendMessage: send broadcast msg: size %d, returned %d\n", jsonString.length(), ret);
+    }
+    Serial.printf("MSG sent [%dB]: ", jsonString.length());
+    Serial.println(text);
+    LOG_DEBUG("sendMessage: send broadcast msg: size %d, returned %d\n", jsonString.length(), ret);
+}
+
+/**
+ * @brief Prints the list of currently connected nodes when it changes.
+ * @note  Currently for debug purposes only
+ */
+static void changedConnectionCallback() {
+  SimpleList<uint32_t> nodes;
+  nodes = mesh.getNodeList();
+  
+  LOG_DEBUG("changedConnectionCallback: num modes: %d, connecion list:", nodes.size());
+
+  SimpleList<uint32_t>::iterator node = nodes.begin();
+  while (node != nodes.end()) {
+    LOG_DEBUG(" %u", *node);
+    node++;
+  }
+}
+
+/**
+ * @brief Function called after receiving a packet
+ * 
+ * @param from sender MAC address
+ * @param msg received packet in String format
+ */
+static void receivedCallback( uint32_t from, String &msg ) {
+  StaticJsonDocument<500> jsonDoc;
+  DeserializationError error = deserializeJson(jsonDoc, msg);
+
+  if (!error) {
+    String sender = jsonDoc["sender"];
+    String text = jsonDoc["text"];
+    Serial.printf("MSG Rx [%dB]: from: %s, text: ", text.length(), sender, text);
+    Serial.println(text);
+  } else {
+    LOG_ERROR("receivedCallback: Failed to parse JSON from: %s, error: %d", from, error);
+  }
+}
+
+/**
+ * @brief Function called after new neighbour node joined a network
+ * 
+ * @param nodeId new neighbour MAC address
+ */
+static void newConnectionCallback(uint32_t nodeId) {
+    LOG_INFO("newConnectionCallback: New Connection, nodeId = %u", nodeId);
+}
+
+/** @} static_api_defs */
+
