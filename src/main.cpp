@@ -4,11 +4,10 @@
   @note Based on example made by Rui Santos (Random Nerd Tutorial): https://github.com/gmag11/painlessMesh/blob/master/examples/basic/basic.ino
 
   @todo:
-  - debug macro, defines to external file
-  - wifi AP,
-  - webserver (chat in js, dns)   
+  - config and test on board with external antena
   - doxygen
-  - unit tests 
+  - unit tests
+  - check if possible add webserver (chat in js, dns)   
   */
 
 #include <Arduino.h>
@@ -22,20 +21,6 @@
  * @defgroup defines_and_enums Defines and Enums
  * @{
  */
-
-/**
- * @brief Macro to enable additional debug logs and functions
- * XXX: comment if not needed (release mode)
- */
-#define DEBUG_INFO
-
-/// XXX: Define the DEBUG macro above to enable conditional printf
-#ifdef DEBUG_INFO
-    #define LOG_DEBUG(...) Serial.printf("DEBUG: " __VA_ARGS__); Serial.println()
-#else
-    #define LOG_DEBUG(...) // No operation
-#endif
-
 #define LOG_ERROR(...) Serial.printf("ERROR: " __VA_ARGS__); Serial.println()
 #define LOG_INFO(...) Serial.printf("INFO: " __VA_ARGS__); Serial.println()
 
@@ -77,6 +62,19 @@ Task taskCheckSerial(TASK_MILLISECOND * 250, 1, &checkSerial);
  * @brief Variable to control built-in LED to indicate the number of nodes in the network 
  */
 static volatile bool onFlag = true;
+
+/**
+ * @brief Variable to enable/disable additional debug logs on Serial
+ */
+bool debugEnabled = false;
+
+/**
+ * @brief Macro to enable additional debug logs and function
+ * @info: Debug is enabled by default. To disable pull down the DEBUG_PIN defined in pinout.h
+ */
+#define LOG_DEBUG(...) \
+  if (debugEnabled) { Serial.printf("DEBUG: " __VA_ARGS__); Serial.println(); }
+
 /** @} global_variables */
 
 /*************************************************************************** Main function ****************************************************************************/
@@ -99,14 +97,20 @@ void setup() {
   userScheduler.addTask(taskCheckSerial);
   taskCheckSerial.enable();
 
-  pinMode(LED, OUTPUT);
-  LOG_DEBUG("Setup completed");
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(DEBUG_PIN, INPUT_PULLUP);
+
+  if (HIGH == digitalRead(DEBUG_PIN)) {
+    debugEnabled = true;
+  }
+
+  LOG_DEBUG("Setup completed, debugEnabled = %b", debugEnabled);
 }
 
 void loop() {
   // it will run the user scheduler as well
   mesh.update();
-  digitalWrite(LED, onFlag);
+  digitalWrite(LED_PIN, onFlag);
 }
 /** @} main_function */
 
@@ -213,4 +217,3 @@ static void newConnectionCallback(uint32_t nodeId) {
 }
 
 /** @} static_api_defs */
-
