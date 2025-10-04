@@ -4,7 +4,6 @@
   @note Based on example made by Rui Santos (Random Nerd Tutorial): https://github.com/gmag11/painlessMesh/blob/master/examples/basic/basic.ino
 
   @todo:
-  - config and test on board with external antena
   - doxygen
   - unit tests
   - check if possible add webserver (chat in js, dns)   
