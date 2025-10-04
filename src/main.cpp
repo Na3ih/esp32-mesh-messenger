@@ -1,10 +1,11 @@
 /**
-  @brief TODO:  
+  @brief  Implementation of a mesh network messenger using the ESP-NOW protocol. 
+          Messages received via Serial are broadcast across the mesh network. 
+          Network configuration is defined in the mesh_config file. 
   
   @note Based on example made by Rui Santos (Random Nerd Tutorial): https://github.com/gmag11/painlessMesh/blob/master/examples/basic/basic.ino
 
   @todo:
-  - doxygen
   - unit tests
   - check if possible add webserver (chat in js, dns)   
   */
